@@ -1,0 +1,607 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>QuantumSeed — Verifiable RNG</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.2/ethers.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #0d0620;
+    --grid: #4a1d80;
+    --grid-soft: rgba(74, 29, 128, 0.35);
+    --tile: #1a0e35;
+    --tile-2: #221046;
+    --fg: #f0e8ff;
+    --muted: #9a8bc4;
+    --orange-1: #ff6b00;
+    --orange-2: #ffb400;
+    --violet: #a855ff;
+    --pink: #ff4fbf;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --err: #f87171;
+    --border: rgba(168, 85, 255, 0.25);
+  }
+  * { box-sizing: border-box; }
+  html, body { background: var(--bg); color: var(--fg); font-family: "Inter", system-ui, sans-serif; }
+  body {
+    margin: 0; min-height: 100vh;
+    background-color: var(--bg);
+    background-image:
+      linear-gradient(30deg, var(--grid-soft) 1px, transparent 1px),
+      linear-gradient(150deg, var(--grid-soft) 1px, transparent 1px),
+      radial-gradient(ellipse at 20% -10%, rgba(255, 107, 0, 0.12), transparent 55%),
+      radial-gradient(ellipse at 90% 110%, rgba(168, 85, 255, 0.18), transparent 60%);
+    background-size: 44px 76px, 44px 76px, 100% 100%, 100% 100%;
+    background-position: 0 0, 0 0, 0 0, 0 0;
+  }
+  a { color: var(--violet); }
+
+  /* Topbar */
+  .topbar {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 28px;
+    background: rgba(13, 6, 32, 0.85);
+    backdrop-filter: blur(10px);
+    border-bottom: 1px solid var(--border);
+  }
+  .wordmark {
+    font-family: "Orbitron", sans-serif; font-weight: 800; font-size: 22px;
+    letter-spacing: 3px;
+    background: linear-gradient(90deg, var(--orange-1), var(--orange-2), var(--violet));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .net-pill {
+    font-family: "JetBrains Mono", monospace; font-size: 11px;
+    padding: 4px 10px; border: 1px solid var(--border); border-radius: 6px;
+    color: var(--muted); margin-left: 12px;
+  }
+  .row { display: flex; align-items: center; gap: 10px; }
+
+  /* Buttons */
+  .btn {
+    font-family: "Space Grotesk", sans-serif; font-weight: 600;
+    padding: 10px 18px; border-radius: 8px; border: none; cursor: pointer;
+    color: #1a0800; background: linear-gradient(135deg, var(--orange-1), var(--orange-2));
+    box-shadow: 0 6px 0 rgba(255, 107, 0, 0.25), 0 10px 30px rgba(255, 107, 0, 0.3);
+    transition: transform .12s ease, box-shadow .12s ease;
+    letter-spacing: 0.4px;
+  }
+  .btn:hover { transform: translateY(-1px) rotate(-0.4deg); }
+  .btn:active { transform: translateY(1px); box-shadow: 0 3px 0 rgba(255, 107, 0, 0.25); }
+  .btn:disabled { opacity: .5; cursor: not-allowed; transform: none; }
+  .btn-ghost {
+    background: transparent; color: var(--fg); border: 1px solid var(--border);
+    box-shadow: none;
+  }
+  .btn-ghost:hover { background: rgba(168, 85, 255, 0.1); }
+
+  /* Layout */
+  .hero {
+    max-width: 1240px; margin: 0 auto; padding: 40px 28px 20px;
+  }
+  .hero h1 {
+    font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 36px;
+    margin: 0 0 6px; letter-spacing: -0.5px;
+  }
+  .hero p { color: var(--muted); margin: 0; font-size: 15px; }
+
+  .grid {
+    max-width: 1240px; margin: 0 auto; padding: 12px 28px 60px;
+    display: grid; grid-template-columns: 1fr 1.2fr; gap: 24px;
+  }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+  /* Tiles */
+  .tile {
+    background: linear-gradient(160deg, var(--tile) 0%, var(--tile-2) 100%);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 22px;
+    transform: perspective(1200px) rotateX(4deg);
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(168, 85, 255, 0.08) inset;
+    transition: transform .2s ease;
+  }
+  .tile:hover { transform: perspective(1200px) rotateX(2deg) translateY(-2px); }
+  .tile h2 {
+    font-family: "Space Grotesk", sans-serif; font-weight: 700; font-size: 12px;
+    letter-spacing: 3px; text-transform: uppercase; color: var(--violet);
+    margin: 0 0 16px;
+  }
+
+  label { display: block; font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 1.2px; margin: 12px 0 6px; }
+  input, textarea {
+    width: 100%; padding: 12px 14px; background: #0a041a; color: var(--fg);
+    border: 1px solid var(--border); border-radius: 8px;
+    font-family: "JetBrains Mono", monospace; font-size: 13px;
+    outline: none; transition: border-color .12s;
+  }
+  input:focus, textarea:focus { border-color: var(--orange-1); }
+  textarea { resize: vertical; min-height: 60px; }
+
+  .hex {
+    font-family: "JetBrains Mono", monospace; font-weight: 700;
+    word-break: break-all; line-height: 1.5;
+    background: linear-gradient(90deg, var(--orange-2) 0%, var(--orange-1) 25%, var(--pink) 55%, var(--violet) 85%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .hex-sm { font-size: 12px; }
+  .hex-md { font-size: 14px; }
+  .hex-lg { font-size: 20px; letter-spacing: 0.5px; }
+
+  .commit-preview {
+    background: #0a041a; border: 1px dashed var(--border);
+    border-radius: 8px; padding: 12px; margin-top: 8px;
+    min-height: 44px;
+  }
+
+  /* Request list */
+  .reqs { display: flex; flex-direction: column; gap: 16px; }
+  .req {
+    background: linear-gradient(150deg, #180a30, #221046);
+    border: 1px solid var(--border); border-radius: 8px;
+    padding: 18px; transform: perspective(1400px) rotateX(3deg);
+    box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  }
+  .req-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .req-id { font-family: "Orbitron", sans-serif; font-weight: 800; color: var(--fg); font-size: 15px; letter-spacing: 2px; }
+
+  .pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 999px;
+    font-family: "Space Grotesk", sans-serif; font-weight: 600; font-size: 11px;
+    letter-spacing: 1px; text-transform: uppercase;
+  }
+  .pill::before { content: ""; width: 6px; height: 6px; border-radius: 50%; }
+  .pill.pending { background: rgba(251, 191, 36, 0.15); color: var(--warn); }
+  .pill.pending::before { background: var(--warn); }
+  .pill.ready { background: rgba(255, 107, 0, 0.18); color: var(--orange-2); }
+  .pill.ready::before { background: var(--orange-1); }
+  .pill.revealed { background: rgba(74, 222, 128, 0.15); color: var(--ok); }
+  .pill.revealed::before { background: var(--ok); }
+  .pill.expired { background: rgba(248, 113, 113, 0.15); color: var(--err); }
+  .pill.expired::before { background: var(--err); }
+
+  .meta { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 20px; font-size: 12px; color: var(--muted); margin: 8px 0 12px; }
+  .meta b { color: var(--fg); font-family: "JetBrains Mono", monospace; font-weight: 500; }
+
+  .reveal-form { margin-top: 10px; padding-top: 12px; border-top: 1px dashed var(--border); }
+  .reveal-form label { margin-top: 6px; }
+
+  .output-block {
+    margin-top: 10px; padding: 12px; background: #0a041a; border-radius: 8px;
+    border: 1px solid rgba(74, 222, 128, 0.2);
+  }
+  .output-block label { color: var(--ok); margin-top: 0; }
+
+  /* Empty state */
+  .empty { text-align: center; padding: 40px 20px; color: var(--muted); }
+  .cubes { margin: 0 auto 14px; display: block; }
+
+  /* Toasts */
+  .toasts { position: fixed; top: 74px; right: 20px; z-index: 100; display: flex; flex-direction: column; gap: 8px; }
+  .toast {
+    padding: 12px 16px; border-radius: 8px; min-width: 260px; max-width: 380px;
+    background: #1a0e35; border: 1px solid var(--border); color: var(--fg);
+    font-size: 13px; box-shadow: 0 12px 28px rgba(0,0,0,0.4);
+    animation: slideIn .2s ease;
+  }
+  .toast.ok { border-left: 3px solid var(--ok); }
+  .toast.err { border-left: 3px solid var(--err); }
+  .toast.info { border-left: 3px solid var(--violet); }
+  @keyframes slideIn { from { transform: translateX(20px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  .footer { text-align: center; color: var(--muted); font-size: 11px; padding: 24px; font-family: "JetBrains Mono", monospace; }
+  .warn-banner {
+    max-width: 1240px; margin: 0 auto; padding: 10px 18px;
+    background: rgba(251, 191, 36, 0.08); border: 1px solid rgba(251, 191, 36, 0.25);
+    border-radius: 8px; color: var(--warn); font-size: 12px;
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="row">
+    <div class="wordmark">QUANTUMSEED</div>
+    <span class="net-pill" id="netPill">BOT TESTNET · 968</span>
+  </div>
+  <div class="row">
+    <span class="net-pill" id="acct">not connected</span>
+    <button class="btn" id="connectBtn">Connect Wallet</button>
+  </div>
+</div>
+
+<div class="hero">
+  <h1>Provable randomness. Commit. Reveal. Verify.</h1>
+  <p>On-chain commit-reveal RNG on BOT Chain — every output is verifiable from its inputs.</p>
+</div>
+
+<div class="grid">
+  <!-- LEFT: New Commit -->
+  <div class="tile">
+    <h2>New Commit</h2>
+
+    <label for="secretInput">Secret (phrase or 0x… bytes32)</label>
+    <textarea id="secretInput" placeholder="anything only you know"></textarea>
+
+    <label for="saltInput">Salt (optional 0x… bytes32 — auto-generated if empty)</label>
+    <input id="saltInput" placeholder="0x…" />
+
+    <label>Commit Hash (keccak256)</label>
+    <div class="commit-preview hex hex-md" id="commitPreview">—</div>
+
+    <label>Fee</label>
+    <div class="hex hex-sm" id="feeLabel">0.001 BOT</div>
+
+    <div style="margin-top: 20px;">
+      <button class="btn" id="commitBtn" style="width:100%; padding:14px;">Commit</button>
+    </div>
+
+    <div class="warn-banner" style="margin-top:16px;">
+      Save your secret + salt locally. You need both to reveal.
+    </div>
+  </div>
+
+  <!-- RIGHT: My Requests -->
+  <div class="tile">
+    <h2>My Requests</h2>
+    <div id="reqs" class="reqs"></div>
+    <div id="empty" class="empty">
+      <svg class="cubes" width="76" height="76" viewBox="0 0 76 76" fill="none">
+        <g transform="translate(38,10)">
+          <polygon points="0,0 24,14 0,28 -24,14" fill="#4a1d80" stroke="#a855ff" stroke-width="1"/>
+          <polygon points="0,28 24,14 24,42 0,56" fill="#221046" stroke="#a855ff" stroke-width="1"/>
+          <polygon points="0,28 -24,14 -24,42 0,56" fill="#180a30" stroke="#a855ff" stroke-width="1"/>
+        </g>
+        <g transform="translate(20,42)">
+          <polygon points="0,0 16,9 0,18 -16,9" fill="#ff6b00" stroke="#ffb400" stroke-width="1" opacity="0.85"/>
+          <polygon points="0,18 16,9 16,27 0,36" fill="#a83e00" stroke="#ffb400" stroke-width="1" opacity="0.85"/>
+          <polygon points="0,18 -16,9 -16,27 0,36" fill="#6b2900" stroke="#ffb400" stroke-width="1" opacity="0.85"/>
+        </g>
+      </svg>
+      <div>No commits yet. Send one from the left.</div>
+    </div>
+  </div>
+</div>
+
+<div class="toasts" id="toasts"></div>
+
+<div class="footer">QUANTUMSEED · commit-reveal RNG · BOT Chain</div>
+
+<script>
+  // ===== NETWORK CONFIG =====
+  // TESTNET (default):
+  const NETWORK = {
+    chainIdHex: "0x3C8", chainIdNum: 968,
+    name: "BOT Chain Testnet", rpcUrl: "https://rpc.bohr.life",
+    currency: { name: "BOT", symbol: "BOT", decimals: 18 },
+    label: "BOT TESTNET · 968",
+  };
+  // MAINNET swap block (uncomment to use):
+  // const NETWORK = {
+  //   chainIdHex: "0x2A5", chainIdNum: 677,
+  //   name: "BOT Chain Mainnet", rpcUrl: "https://rpc.botchain.ai",
+  //   currency: { name: "BOT", symbol: "BOT", decimals: 18 },
+  //   label: "BOT MAINNET · 677",
+  // };
+
+  const CONTRACT_ADDRESS = "0x0000000000000000000000000000000000000000";
+
+  const ABI = [
+    "function commit(bytes32 commitHash) external payable returns (uint256)",
+    "function reveal(uint256 requestId, bytes32 secret, bytes32 salt) external returns (bytes32)",
+    "function expireCommit(uint256 requestId) external",
+    "function getRequest(uint256) view returns (address requester, bytes32 commitHash, uint256 commitBlock, uint256 fee, bytes32 randomOutput, uint8 status)",
+    "function canReveal(uint256) view returns (bool)",
+    "function getRequestsBy(address) view returns (uint256[])",
+    "function requestCount() view returns (uint256)",
+    "function revealDelayBlocks() view returns (uint256)",
+    "function revealWindowBlocks() view returns (uint256)",
+    "function commitFee() view returns (uint256)",
+    "event Committed(uint256 indexed requestId, address indexed requester, bytes32 commitHash, uint256 commitBlock, uint256 fee)",
+    "event Revealed(uint256 indexed requestId, address indexed requester, bytes32 randomOutput)",
+    "event Expired(uint256 indexed requestId, address indexed requester)"
+  ];
+
+  // ===== STATE =====
+  let provider, signer, contract, account;
+  let commitFee = 1000000000000000n; // 0.001 BOT default
+  let revealDelay = 3n;
+  let revealWindow = 256n;
+  let currentBlock = 0;
+  const secretCache = {}; // requestId -> {secret, salt} from this session
+
+  // ===== HELPERS =====
+  const $ = (id) => document.getElementById(id);
+  const toast = (msg, kind = "info") => {
+    const el = document.createElement("div");
+    el.className = "toast " + kind;
+    el.textContent = msg;
+    $("toasts").appendChild(el);
+    setTimeout(() => { el.style.opacity = "0"; el.style.transition = "opacity .3s"; }, 3500);
+    setTimeout(() => el.remove(), 4000);
+  };
+  const short = (a) => a ? a.slice(0, 6) + "…" + a.slice(-4) : "";
+
+  function toBytes32(input) {
+    if (!input) return null;
+    input = input.trim();
+    if (/^0x[0-9a-fA-F]{64}$/.test(input)) return input.toLowerCase();
+    // hash arbitrary string to bytes32
+    return ethers.keccak256(ethers.toUtf8Bytes(input));
+  }
+
+  function randomBytes32() {
+    const arr = new Uint8Array(32);
+    crypto.getRandomValues(arr);
+    return "0x" + Array.from(arr, b => b.toString(16).padStart(2, "0")).join("");
+  }
+
+  function computeCommitHash(secretHex, saltHex) {
+    if (!secretHex || !saltHex) return null;
+    return ethers.keccak256(ethers.solidityPacked(["bytes32", "bytes32"], [secretHex, saltHex]));
+  }
+
+  // ===== WALLET =====
+  async function ensureNetwork() {
+    try {
+      await window.ethereum.request({ method: "wallet_switchEthereumChain", params: [{ chainId: NETWORK.chainIdHex }] });
+    } catch (err) {
+      if (err.code === 4902) {
+        await window.ethereum.request({
+          method: "wallet_addEthereumChain",
+          params: [{
+            chainId: NETWORK.chainIdHex,
+            chainName: NETWORK.name,
+            rpcUrls: [NETWORK.rpcUrl],
+            nativeCurrency: NETWORK.currency,
+          }],
+        });
+      } else { throw err; }
+    }
+  }
+
+  async function connect() {
+    if (!window.ethereum) return toast("MetaMask not found", "err");
+    try {
+      await window.ethereum.request({ method: "eth_requestAccounts" });
+      await ensureNetwork();
+      provider = new ethers.BrowserProvider(window.ethereum);
+      signer = await provider.getSigner();
+      account = await signer.getAddress();
+      contract = new ethers.Contract(CONTRACT_ADDRESS, ABI, signer);
+
+      $("acct").textContent = short(account);
+      $("connectBtn").textContent = "Connected";
+      $("netPill").textContent = NETWORK.label;
+
+      await loadConfig();
+      await refresh();
+      window.ethereum.on("accountsChanged", () => location.reload());
+      window.ethereum.on("chainChanged", () => location.reload());
+      toast("Wallet connected", "ok");
+    } catch (e) {
+      console.error(e);
+      toast(e.shortMessage || e.message || "Connect failed", "err");
+    }
+  }
+
+  async function loadConfig() {
+    try {
+      const [fee, delay, win] = await Promise.all([
+        contract.commitFee(), contract.revealDelayBlocks(), contract.revealWindowBlocks()
+      ]);
+      commitFee = fee; revealDelay = delay; revealWindow = win;
+      $("feeLabel").textContent = ethers.formatEther(fee) + " BOT";
+    } catch (e) { console.warn("config load failed", e); }
+  }
+
+  // ===== LIVE COMMIT PREVIEW =====
+  function updatePreview() {
+    const secretHex = toBytes32($("secretInput").value);
+    let saltHex = $("saltInput").value.trim();
+    if (saltHex) {
+      saltHex = toBytes32(saltHex);
+    }
+    if (!secretHex) {
+      $("commitPreview").textContent = "—";
+      return;
+    }
+    if (!saltHex) {
+      $("commitPreview").textContent = "(salt auto-generated on commit)";
+      return;
+    }
+    const h = computeCommitHash(secretHex, saltHex);
+    $("commitPreview").textContent = h;
+  }
+  $("secretInput").addEventListener("input", updatePreview);
+  $("saltInput").addEventListener("input", updatePreview);
+
+  // ===== COMMIT =====
+  async function doCommit() {
+    if (!contract) return toast("Connect wallet first", "err");
+    const secretHex = toBytes32($("secretInput").value);
+    if (!secretHex) return toast("Enter a secret", "err");
+
+    let saltRaw = $("saltInput").value.trim();
+    let saltHex;
+    if (saltRaw) {
+      saltHex = toBytes32(saltRaw);
+      if (!saltHex) return toast("Bad salt", "err");
+    } else {
+      saltHex = randomBytes32();
+      $("saltInput").value = saltHex;
+    }
+
+    const commitHash = computeCommitHash(secretHex, saltHex);
+    $("commitPreview").textContent = commitHash;
+
+    try {
+      $("commitBtn").disabled = true;
+      toast("Submitting commit…", "info");
+      const tx = await contract.commit(commitHash, { value: commitFee });
+      const rc = await tx.wait();
+      // Find requestId from event
+      let reqId = null;
+      for (const log of rc.logs) {
+        try {
+          const parsed = contract.interface.parseLog(log);
+          if (parsed && parsed.name === "Committed") { reqId = parsed.args.requestId.toString(); break; }
+        } catch {}
+      }
+      if (reqId) {
+        secretCache[reqId] = { secret: secretHex, salt: saltHex };
+      }
+      toast("Committed. Wait " + revealDelay.toString() + " blocks to reveal.", "ok");
+      $("secretInput").value = ""; $("saltInput").value = ""; updatePreview();
+      await refresh();
+    } catch (e) {
+      console.error(e);
+      toast(e.shortMessage || e.reason || e.message || "Commit failed", "err");
+    } finally {
+      $("commitBtn").disabled = false;
+    }
+  }
+
+  // ===== REVEAL =====
+  async function doReveal(reqId) {
+    const secretEl = $("secret-" + reqId);
+    const saltEl = $("salt-" + reqId);
+    const secretHex = toBytes32(secretEl.value);
+    const saltHex = toBytes32(saltEl.value);
+    if (!secretHex || !saltHex) return toast("Need both secret and salt", "err");
+    try {
+      toast("Revealing…", "info");
+      const tx = await contract.reveal(reqId, secretHex, saltHex);
+      await tx.wait();
+      toast("Revealed. Random ready.", "ok");
+      await refresh();
+    } catch (e) {
+      console.error(e);
+      toast(e.shortMessage || e.reason || e.message || "Reveal failed", "err");
+    }
+  }
+
+  // ===== EXPIRE =====
+  async function doExpire(reqId) {
+    try {
+      const tx = await contract.expireCommit(reqId);
+      await tx.wait();
+      toast("Expired", "info");
+      await refresh();
+    } catch (e) {
+      toast(e.shortMessage || e.message || "Expire failed", "err");
+    }
+  }
+
+  // ===== RENDER =====
+  function statusPill(status, ready, expired) {
+    if (status === 1) return `<span class="pill revealed">Revealed</span>`;
+    if (status === 2) return `<span class="pill expired">Expired</span>`;
+    if (expired) return `<span class="pill expired">Expired</span>`;
+    if (ready) return `<span class="pill ready">Ready to Reveal</span>`;
+    return `<span class="pill pending">Pending</span>`;
+  }
+
+  function renderReq(r) {
+    const [requester, commitHash, commitBlock, fee, randomOutput, status] = r.data;
+    const cb = Number(commitBlock);
+    const delayN = Number(revealDelay), winN = Number(revealWindow);
+    const readyBlock = cb + delayN;
+    const expireBlock = cb + winN;
+    const canRevealNow = status === 0 && currentBlock >= readyBlock && currentBlock <= expireBlock;
+    const isExpired = status === 0 && currentBlock > expireBlock;
+
+    const cached = secretCache[r.id.toString()];
+
+    let revealBlock = "";
+    if (status === 0 && !isExpired) {
+      revealBlock = `
+        <div class="reveal-form">
+          <label>Secret</label>
+          <input id="secret-${r.id}" placeholder="0x… or phrase" value="${cached ? cached.secret : ""}" />
+          <label>Salt</label>
+          <input id="salt-${r.id}" placeholder="0x…" value="${cached ? cached.salt : ""}" />
+          <div style="margin-top:12px; display:flex; gap:8px;">
+            <button class="btn" ${canRevealNow ? "" : "disabled"} onclick="doReveal(${r.id})">
+              ${canRevealNow ? "Reveal" : `Wait ${Math.max(0, readyBlock - currentBlock)} blocks`}
+            </button>
+          </div>
+        </div>`;
+    }
+
+    if (isExpired) {
+      revealBlock = `
+        <div class="reveal-form">
+          <button class="btn btn-ghost" onclick="doExpire(${r.id})">Mark Expired</button>
+        </div>`;
+    }
+
+    let outputBlock = "";
+    if (status === 1 && randomOutput && randomOutput !== "0x" + "0".repeat(64)) {
+      outputBlock = `
+        <div class="output-block">
+          <label>Random Output</label>
+          <div class="hex hex-lg">${randomOutput}</div>
+        </div>`;
+    }
+
+    return `
+      <div class="req">
+        <div class="req-head">
+          <div class="req-id">#${r.id}</div>
+          ${statusPill(status, canRevealNow, isExpired)}
+        </div>
+        <div class="meta">
+          <div>commit block <b>${cb}</b></div>
+          <div>current block <b>${currentBlock}</b></div>
+          <div>reveal at <b>${readyBlock}</b></div>
+          <div>expires at <b>${expireBlock}</b></div>
+        </div>
+        <label>Commit Hash</label>
+        <div class="hex hex-sm">${commitHash}</div>
+        ${revealBlock}
+        ${outputBlock}
+      </div>
+    `;
+  }
+
+  async function refresh() {
+    if (!contract || !account) return;
+    try {
+      currentBlock = await provider.getBlockNumber();
+      const ids = await contract.getRequestsBy(account);
+      if (ids.length === 0) {
+        $("reqs").innerHTML = "";
+        $("empty").style.display = "block";
+        return;
+      }
+      $("empty").style.display = "none";
+      // Fetch newest first
+      const sorted = [...ids].map(x => Number(x)).sort((a,b) => b - a);
+      const reqs = await Promise.all(sorted.map(async (id) => ({
+        id, data: await contract.getRequest(id)
+      })));
+      $("reqs").innerHTML = reqs.map(renderReq).join("");
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  window.doReveal = doReveal;
+  window.doExpire = doExpire;
+
+  $("connectBtn").addEventListener("click", connect);
+  $("commitBtn").addEventListener("click", doCommit);
+
+  // Auto-refresh block counter
+  setInterval(() => { if (contract && account) refresh(); }, 6000);
+</script>
+</body>
+</html>
